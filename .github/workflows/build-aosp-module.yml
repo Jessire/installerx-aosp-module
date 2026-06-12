@@ -1,11 +1,21 @@
 name: Build InstallerX AOSP Module
 
-# Manually triggered. Resolves the latest upstream Preview pre-release of
-# wxxsfxyzm/InstallerX-Revived, builds the online AOSP variant from source
-# (applicationId=com.android.packageinstaller), and packs a flashable
-# Magisk/KernelSU module that mirrors the official module layout.
+# Builds the online AOSP variant of wxxsfxyzm/InstallerX-Revived from source
+# (applicationId=com.android.packageinstaller) and packs a flashable
+# Magisk/KernelSU module mirroring the official module layout.
+#
+# Triggers:
+#   - schedule      : poll upstream for a new Preview pre-release; build only
+#                     when that version has not been built yet.
+#   - workflow_dispatch : manual run (optional ref + force rebuild).
+#
+# On success the module zip is published as a draft pre-release and pushed to a
+# Telegram bot (sendDocument).
 
 on:
+  schedule:
+    # Poll every 6 hours (UTC). GitHub may delay scheduled runs under load.
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       ref:
@@ -13,6 +23,11 @@ on:
         type: string
         required: false
         default: ""
+      force:
+        description: "Rebuild even if this version was already built"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -22,16 +37,15 @@ env:
   APP_ID: com.android.packageinstaller
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      ref: ${{ steps.decide.outputs.ref }}
+      module_tag: ${{ steps.decide.outputs.module_tag }}
     steps:
-      - name: Checkout this repo (module tooling)
-        uses: actions/checkout@v4
-        with:
-          path: tooling
-
-      - name: Resolve upstream ref
-        id: resolve
+      - name: Resolve upstream ref and dedup
+        id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -47,14 +61,42 @@ jobs:
             echo "ERROR: could not resolve a Preview pre-release tag." >&2
             exit 1
           fi
+
+          MODULE_TAG="module-${REF}"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
-          echo "Resolved upstream ref: $REF"
+          echo "module_tag=$MODULE_TAG" >> "$GITHUB_OUTPUT"
+
+          FORCE="${{ inputs.force }}"
+          if [ "$FORCE" = "true" ]; then
+            echo "Force requested; will build $REF."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Dedup against our own already-built module releases.
+          if gh release view "$MODULE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Module for $REF already built ($MODULE_TAG); skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New upstream version $REF; will build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo (module tooling)
+        uses: actions/checkout@v4
+        with:
+          path: tooling
 
       - name: Checkout upstream source
         uses: actions/checkout@v4
         with:
           repository: ${{ env.UPSTREAM }}
-          ref: ${{ steps.resolve.outputs.ref }}
+          ref: ${{ needs.check.outputs.ref }}
           fetch-depth: 0
           path: upstream
 
@@ -63,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           cd upstream
-          VERSION="${{ steps.resolve.outputs.ref }}"
+          VERSION="${{ needs.check.outputs.ref }}"
           # Faithful monotonic versionCode: upstream git commit count (same basis
           # the project uses for the APK versionCode).
           VERSION_CODE=$(git rev-list --count HEAD)
@@ -119,6 +161,7 @@ jobs:
             -PVERSION_NAME="${{ steps.meta.outputs.version }}"
 
       - name: Pack module
+        id: pack
         run: |
           set -euo pipefail
           chmod +x tooling/scripts/pack-module.sh
@@ -132,8 +175,9 @@ jobs:
             find upstream/app/build/outputs/apk -type f -name "*.apk" || true
             exit 1
           fi
-          tooling/scripts/pack-module.sh "$apk" "$VERSION" "$CODE" online \
-            "dist/InstallerX-AOSP-${VERSION}-online.zip"
+          ZIP="dist/InstallerX-AOSP-${VERSION}-online.zip"
+          tooling/scripts/pack-module.sh "$apk" "$VERSION" "$CODE" online "$ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
       - name: Upload module artifact
         uses: actions/upload-artifact@v4
@@ -146,8 +190,33 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: "InstallerX AOSP Module ${{ steps.meta.outputs.version }}"
-          tag_name: "module-${{ steps.meta.outputs.version }}"
+          tag_name: ${{ needs.check.outputs.module_tag }}
           draft: true
           prerelease: true
           generate_release_notes: false
           files: dist/*.zip
+
+      - name: Send module to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          ZIP: ${{ steps.pack.outputs.zip }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "Telegram secrets not set; skipping notification."
+            exit 0
+          fi
+          CAPTION=$(printf 'InstallerX AOSP Module\nVersion: %s\nFlash in Magisk / KernelSU / APatch.' "$VERSION")
+          HTTP=$(curl -sS -o /tmp/tg_resp.json -w '%{http_code}' \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+            -F "chat_id=${TELEGRAM_CHAT_ID}" \
+            -F "document=@${ZIP}" \
+            -F "caption=${CAPTION}")
+          echo "Telegram HTTP $HTTP"
+          cat /tmp/tg_resp.json
+          if [ "$HTTP" != "200" ]; then
+            echo "ERROR: Telegram delivery failed." >&2
+            exit 1
+          fi
