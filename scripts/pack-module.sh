@@ -36,6 +36,13 @@ if command -v aapt2 >/dev/null 2>&1; then
   echo "Verified packageName: ${PKG:-<unknown>}"
 fi
 
+# Resolve the output path to absolute BEFORE entering the build dir, otherwise
+# the later "cd $BUILD_DIR" makes a relative OUT_ZIP resolve inside the temp
+# dir (which has no dist/), causing zip to fail with exit code 15.
+mkdir -p "$(dirname "$OUT_ZIP")"
+OUT_DIR_ABS="$(cd "$(dirname "$OUT_ZIP")" && pwd)"
+OUT_ZIP="$OUT_DIR_ABS/$(basename "$OUT_ZIP")"
+
 BUILD_DIR="$(mktemp -d)"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 
@@ -58,7 +65,6 @@ echo "----- module.prop -----"
 cat "$PROP"
 echo "-----------------------"
 
-mkdir -p "$(dirname "$OUT_ZIP")"
 rm -f "$OUT_ZIP"
 
 # Zip from inside the tree so paths are module-root relative (no leading ./).
