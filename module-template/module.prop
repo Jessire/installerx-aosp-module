@@ -1,0 +1,7 @@
+id=com.android.packageinstaller
+name=InstallerX Revived
+version=__VERSION__
+versionCode=__VERSIONCODE__
+author=wxxsfxyzm
+description=InstallerX as System Package Installer (AOSP, __VARIANT__)
+actionIcon=launcher.png

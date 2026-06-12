@@ -1,0 +1,153 @@
+name: Build InstallerX AOSP Module
+
+# Manually triggered. Resolves the latest upstream Preview pre-release of
+# wxxsfxyzm/InstallerX-Revived, builds the online AOSP variant from source
+# (applicationId=com.android.packageinstaller), and packs a flashable
+# Magisk/KernelSU module that mirrors the official module layout.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream ref to build (blank = latest Preview pre-release tag)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM: wxxsfxyzm/InstallerX-Revived
+  APP_ID: com.android.packageinstaller
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo (module tooling)
+        uses: actions/checkout@v4
+        with:
+          path: tooling
+
+      - name: Resolve upstream ref
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REF="${{ inputs.ref }}"
+          if [ -z "$REF" ]; then
+            # Latest Preview pre-release tag (auto-preview keeps a single rolling tag).
+            REF=$(gh release list --repo "$UPSTREAM" --limit 30 \
+                  --json tagName,isPrerelease,createdAt \
+                  --jq 'map(select(.isPrerelease)) | sort_by(.createdAt) | reverse | .[0].tagName')
+          fi
+          if [ -z "$REF" ] || [ "$REF" = "null" ]; then
+            echo "ERROR: could not resolve a Preview pre-release tag." >&2
+            exit 1
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Resolved upstream ref: $REF"
+
+      - name: Checkout upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ steps.resolve.outputs.ref }}
+          fetch-depth: 0
+          path: upstream
+
+      - name: Derive version metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          cd upstream
+          VERSION="${{ steps.resolve.outputs.ref }}"
+          # Faithful monotonic versionCode: upstream git commit count (same basis
+          # the project uses for the APK versionCode).
+          VERSION_CODE=$(git rev-list --count HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION code=$VERSION_CODE"
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "25"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Optional signing key
+        id: signing
+        env:
+          SIGNING_KEY_STORE_BASE64: ${{ secrets.SIGNING_KEY_STORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd upstream
+          if [ -z "${SIGNING_STORE_PASSWORD:-}" ] || [ -z "${SIGNING_KEY_STORE_BASE64:-}" ] \
+             || [ -z "${SIGNING_KEY_PASSWORD:-}" ] || [ -z "${SIGNING_KEY_ALIAS:-}" ]; then
+            echo "No signing secrets; release build falls back to the debug keystore."
+            exit 0
+          fi
+          mkdir -p keystore
+          echo "$SIGNING_KEY_STORE_BASE64" | base64 --decode > keystore/carlyu.jks
+          {
+            echo "storeFile=keystore/carlyu.jks"
+            echo "keyAlias=$SIGNING_KEY_ALIAS"
+            echo "keyPassword=$SIGNING_KEY_PASSWORD"
+            echo "storePassword=$SIGNING_STORE_PASSWORD"
+          } > keystore.properties
+
+      - name: Grant gradlew execute permission
+        run: chmod +x upstream/gradlew
+
+      - name: Build online AOSP-variant APK
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd upstream
+          ./gradlew assembleOnlinePreviewRelease \
+            -PAPP_ID="${{ env.APP_ID }}" \
+            -PVERSION_NAME="${{ steps.meta.outputs.version }}"
+
+      - name: Pack module
+        run: |
+          set -euo pipefail
+          chmod +x tooling/scripts/pack-module.sh
+          mkdir -p dist
+          VERSION="${{ steps.meta.outputs.version }}"
+          CODE="${{ steps.meta.outputs.version_code }}"
+          apk=$(find "upstream/app/build/outputs/apk/onlinePreview/release" \
+                -maxdepth 1 -type f -name "*.apk" | head -n1)
+          if [ -z "$apk" ]; then
+            echo "ERROR: online APK not found" >&2
+            find upstream/app/build/outputs/apk -type f -name "*.apk" || true
+            exit 1
+          fi
+          tooling/scripts/pack-module.sh "$apk" "$VERSION" "$CODE" online \
+            "dist/InstallerX-AOSP-${VERSION}-online.zip"
+
+      - name: Upload module artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installerx-aosp-module-${{ steps.meta.outputs.version }}
+          path: dist/*.zip
+          retention-days: 30
+
+      - name: Publish draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "InstallerX AOSP Module ${{ steps.meta.outputs.version }}"
+          tag_name: "module-${{ steps.meta.outputs.version }}"
+          draft: true
+          prerelease: true
+          generate_release_notes: false
+          files: dist/*.zip
