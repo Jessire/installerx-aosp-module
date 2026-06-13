@@ -5,17 +5,13 @@ name: Build InstallerX AOSP Module
 # Magisk/KernelSU module mirroring the official module layout.
 #
 # Triggers:
-#   - schedule      : poll upstream for a new Preview pre-release; build only
-#                     when that version has not been built yet.
-#   - workflow_dispatch : manual run (optional ref + force rebuild).
+#   - workflow_dispatch : manual run from GitHub or Telegram Bot
+#                         (optional ref + force rebuild).
 #
 # On success the module zip is published as a draft pre-release and pushed to a
 # Telegram bot (sendDocument).
 
 on:
-  schedule:
-    # Poll every 6 hours (UTC). GitHub may delay scheduled runs under load.
-    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       ref:

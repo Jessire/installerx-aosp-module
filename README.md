@@ -18,22 +18,25 @@ The official module therefore carries **no** `privapp-permissions` allowlist of
 its own; it reuses the system''s existing `com.android.packageinstaller`
 privileged entry by replacing that package in `/system/priv-app`.
 
-## What the workflow does
+## What the workflows do
 
-1. Resolves the latest upstream **Preview** pre-release tag (or a ref you pass).
-2. Checks out upstream source at that tag.
-3. Builds the online AOSP variant: `assembleOnlinePreviewRelease -PAPP_ID=com.android.packageinstaller`.
-4. Packs a flashable module mirroring the official layout
+1. `Telegram Bot` polls your bot commands every 5 minutes.
+2. `/build` triggers the module workflow for the latest upstream **Preview** pre-release tag.
+3. `/build <ref>` triggers a build for a specific upstream tag or branch.
+4. `Build InstallerX AOSP Module` checks out upstream source and builds the online AOSP variant:
+   `assembleOnlinePreviewRelease -PAPP_ID=com.android.packageinstaller`.
+5. It packs a flashable module mirroring the official layout
    (`system/priv-app/PackageInstaller/PackageInstaller.apk` + module scripts).
-5. Uploads the zip as an artifact and a draft pre-release.
+6. It uploads the zip as an artifact, publishes a draft pre-release, and sends the zip to Telegram.
 
 ## Usage
 
-Push this folder to a new GitHub repo, then run the **Build InstallerX AOSP
-Module** workflow from the Actions tab.
+Send one of these commands to your Telegram bot:
 
-Input:
-- `ref`: blank to auto-pick the latest Preview pre-release, or an explicit tag/branch.
+- `/build`: build the latest upstream Preview and send the module zip.
+- `/build <ref>`: build a specific upstream tag or branch.
+- `/status`: show recent build runs.
+- `/help`: show commands.
 
 The workflow always builds the **online** variant.
 
