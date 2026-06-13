@@ -20,9 +20,9 @@ privileged entry by replacing that package in `/system/priv-app`.
 
 ## What the workflows do
 
-1. `Telegram Bot` polls your bot commands every 5 minutes.
-2. `/build` triggers the module workflow for the latest upstream **Preview** pre-release tag.
-3. `/build <ref>` triggers a build for a specific upstream tag or branch.
+1. `bot-service` receives Telegram webhook commands.
+2. `/build` immediately triggers the module workflow for the latest upstream **Preview** pre-release tag.
+3. `/build <ref>` immediately triggers a build for a specific upstream tag or branch.
 4. `Build InstallerX AOSP Module` checks out upstream source and builds the online AOSP variant:
    `assembleOnlinePreviewRelease -PAPP_ID=com.android.packageinstaller`.
 5. It packs a flashable module mirroring the official layout
@@ -55,6 +55,7 @@ is fine for personal flashing. To match a stable signature, set repo secrets:
 
 ```
 .github/workflows/build-aosp-module.yml   manual build + pack workflow
+bot-service/                               Telegram webhook service
 module-template/                           official module files (verbatim)
 scripts/pack-module.sh                     assembles the module zip
 ```
