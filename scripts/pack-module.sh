@@ -48,6 +48,13 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 cp -a "$TEMPLATE_DIR/." "$BUILD_DIR/"
 
+chmod 0755 \
+  "$BUILD_DIR/customize.sh" \
+  "$BUILD_DIR/service.sh" \
+  "$BUILD_DIR/action.sh" \
+  "$BUILD_DIR/post-fs-data.sh" \
+  "$BUILD_DIR/uninstall.sh"
+
 # Drop the APK into the priv-app slot, mirroring the official tree.
 APK_DEST_DIR="$BUILD_DIR/system/priv-app/PackageInstaller"
 mkdir -p "$APK_DEST_DIR"

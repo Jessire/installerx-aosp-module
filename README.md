@@ -27,6 +27,8 @@ privileged entry by replacing that package in `/system/priv-app`.
    `assembleOnlinePreviewRelease -PAPP_ID=com.android.packageinstaller`.
 5. It packs a flashable module mirroring the official layout
    (`system/priv-app/PackageInstaller/PackageInstaller.apk` + module scripts).
+   The module template clears `package_cache` early in boot so the overlaid
+   system PackageInstaller does not crash on stale parsed state.
 6. It uploads the zip as an artifact, publishes a draft pre-release, and sends the zip to Telegram.
 
 ## Usage
