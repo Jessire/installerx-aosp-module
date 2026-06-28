@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "installerx-aosp-telegram-bot",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-06-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "BUILD_WORKFLOW": "build-aosp-module.yml",
+    "GITHUB_REF": "master",
+    "GITHUB_REPOSITORY": "Jessire/installerx-aosp-module"
+  },
+  "secrets": {
+    "required": [
+      "GITHUB_TOKEN",
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_CHAT_ID",
+      "WEBHOOK_SECRET"
+    ]
+  }
+}

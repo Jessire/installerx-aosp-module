@@ -42,6 +42,36 @@ Send one of these commands to your Telegram bot:
 
 The workflow always builds the **online** variant.
 
+## Cloudflare Worker bot deployment
+
+Deploy the Telegram bot from `bot-service` as a Cloudflare Worker:
+
+```bash
+cd bot-service
+npm install
+npm run cf:deploy
+```
+
+Configure these Worker secrets before deploy:
+
+- `GITHUB_TOKEN`: GitHub token with permission to dispatch and read workflow runs.
+- `TELEGRAM_BOT_TOKEN`: Telegram bot token.
+- `TELEGRAM_CHAT_ID`: allowed Telegram chat id.
+- `WEBHOOK_SECRET`: random path segment for the Telegram webhook URL.
+
+Keep these non-secret Worker variables in `bot-service/wrangler.jsonc` unless the
+workflow or repository changes:
+
+- `BUILD_WORKFLOW`: GitHub Actions workflow file name.
+- `GITHUB_REF`: repository ref used when dispatching the workflow.
+- `GITHUB_REPOSITORY`: target GitHub repository.
+
+After deploy, set the Telegram webhook to:
+
+```text
+https://<worker-domain>/telegram/<WEBHOOK_SECRET>
+```
+
 ## Signing (optional)
 
 Without signing secrets the release APK is signed with the debug keystore, which
